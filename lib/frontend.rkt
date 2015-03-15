@@ -87,6 +87,7 @@
 
 #|
  | eliminates (set! ...) assignments to parameters in lambdas
+ | essentially "curries" a lambda at the referenced value to make it become a reference to a vector variable
  |#
 (define (substitute-refs-with-vector-refs expr sym)
   (let loop ()
@@ -110,8 +111,50 @@
                                         ,@body-after*))))]
     [else else]))
 
+#|
+ | Lifts literals from the heap (symbols and strings turn into quoted data)
+ |#
+
+(define s-table '())
+
+(define (immediate-literal-form exp)
+  (let ([quoted (cadr exp)]
+        [exp (caddr exp)])
+    (if (null? quoted)
+        exp
+        (let ([q-exps (map heap-literal-destruct (map cadadr quoted))]
+              [q-vars (map car quoted)])
+          (let ([exp `((lambda ,q-vars '(free) '(fixed) ,exp) ,@q-exps)])
+            (if (null? s-table)
+                exp
+                (let ([s-exps (map symbol-destruct (map car s-table))]
+                      [s-vars (map cadr s-table)])
+                  `((lambda ,s-vars '(free) '(fixed) ,exp) ,@s-exps))))))))
+
+(define heap-literal-destruct
+  (match-lambda
+    [(? symbol? obj) (let ([entry (assq obj s-table)])
+                       (if (pair? entry)
+                           (cadr entry)
+                           (let ([v (gen-ssym)])
+                             (set! s-table (cons (list obj v) s-table))
+                             v)))]
+    [(or (? boolean? obj)
+         (? number? obj)
+         (? char? obj)
+         (? null? obj)) `(quote ,obj)]
+    [(? string? obj) (let ([char-exps (map (lambda (c) `(quote ,c)) (string->list obj))])
+                       `(string ,@char-exps))]
+    [(? pair? obj) (let ([car-exp (heap-literal-destruct (car obj))]
+                         [cdr-exp (heap-literal-destruct (cdr obj))])
+                     `(%cons ,car-exp ,cdr-exp))]
+    [(? vector? obj) (let ([contents-exps (map heap-literal-destruct (vector->list obj))])
+                       `(vector ,@contents-exps))]))
 
 
+(define (symbol-destruct sym)
+  (let ([char-exps (map (lambda (c) `(quote ,c)) (string->list (symbol->string sym)))])
+    `(%string->uninterned-symbol (string ,@char-exps))))
 #|
  | Utility functions for everything
  |#
@@ -124,3 +167,6 @@
   (if (list? l)
       l
       (fix-list l)))
+
+(define gen-qsym gensym)
+(define gen-ssym gensym)
