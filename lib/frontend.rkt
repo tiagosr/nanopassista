@@ -131,30 +131,78 @@
                       [s-vars (map cadr s-table)])
                   `((lambda ,s-vars '(free) '(fixed) ,exp) ,@s-exps))))))))
 
-(define heap-literal-destruct
-  (match-lambda
-    [(? symbol? obj) (let ([entry (assq obj s-table)])
-                       (if (pair? entry)
-                           (cadr entry)
-                           (let ([v (gen-ssym)])
-                             (set! s-table (cons (list obj v) s-table))
-                             v)))]
-    [(or (? boolean? obj)
-         (? number? obj)
-         (? char? obj)
-         (? null? obj)) `(quote ,obj)]
-    [(? string? obj) (let ([char-exps (map (lambda (c) `(quote ,c)) (string->list obj))])
-                       `(string ,@char-exps))]
-    [(? pair? obj) (let ([car-exp (heap-literal-destruct (car obj))]
-                         [cdr-exp (heap-literal-destruct (cdr obj))])
-                     `(%cons ,car-exp ,cdr-exp))]
-    [(? vector? obj) (let ([contents-exps (map heap-literal-destruct (vector->list obj))])
-                       `(vector ,@contents-exps))]))
+(define (heap-literal-destruct obj)
+  (cond
+    [(symbol? obj) (let ([entry (assq obj s-table)])
+                     (if (pair? entry)
+                         (cadr entry)
+                         (let ([v (gen-ssym)])
+                           (set! s-table (cons (list obj v) s-table))
+                           v)))]
+    [(or (boolean? obj)
+         (number? obj)
+         (char? obj)
+         (null? obj)) `(quote ,obj)]
+    [(string? obj) (let ([char-exps (map (lambda (c) `(quote ,c)) (string->list obj))])
+                     `(string ,@char-exps))]
+    [(pair? obj) (let ([car-exp (heap-literal-destruct (car obj))]
+                       [cdr-exp (heap-literal-destruct (cdr obj))])
+                   `(%cons ,car-exp ,cdr-exp))]
+    [(vector? obj) (let ([contents-exps (map heap-literal-destruct (vector->list obj))])
+                     `(vector ,@contents-exps))]))
 
 
 (define (symbol-destruct sym)
   (let ([char-exps (map (lambda (c) `(quote ,c)) (string->list (symbol->string sym)))])
     `(%string->uninterned-symbol (string ,@char-exps))))
+
+#|
+ | Free and bound variables separation
+ | bound variable: local variable, declared in current scope
+ | free variable: non-local variable, declared in an exterior scope
+ |#
+
+(define (variable-separation exp bounds frees)
+  (if (not (pair? exp))
+      (let ([i (pass-list-index exp bounds)])
+        (if i
+            `(bound ,i ,exp)
+            (let ([i (pass-list-index exp frees)])
+              (if i
+                  `(free ,i exp)
+                  exp))))
+      (match exp
+        [`(quote ,obj) `(quote ,obj)]
+        [`(begin ,a ,b)
+         (let ([a-exp (variable-separation a bounds frees)]
+               [b-exp (variable-separation b bounds frees)])
+           `(begin ,a-exp ,b-exp))]
+        [`(if ,t ,a ,b)
+         (let ([t-exp (variable-separation t bounds frees)]
+               [a-exp (variable-separation a bounds frees)]
+               [b-exp (variable-separation b bounds frees)])
+           `(if ,t-exp ,a-exp ,b-exp))]
+        [`(lambda ,formals ,quoted-frees ,arity ,body)
+         (let ([free (cdadr quoted-frees)])
+           (let ([free-exps (variable-separation-list free bounds frees)]
+                 [body-exp (variable-separation body formals free)])
+             `(build-closure (lambda ,formals ,arity ,body-exp) ,@free-exps)))]
+        [else (let ([operator (car exp)]
+                    [operands (cdr exp)])
+                (let ([operator-exp (variable-separation operator bounds frees)]
+                      [operands-exps (variable-separation-list operands bounds frees)])
+                  `(,operator-exp ,@operands-exps)))])))
+
+(define (variable-separation-list ls bounds frees)
+  (map (lambda (e) (variable-separation e bounds frees)) ls))
+
+#|
+ | code generation form
+ |#
+
+(define (code-generation-form exp)
+  (variable-separation exp '() '()))
+
 #|
  | Utility functions for everything
  |#
@@ -167,6 +215,8 @@
   (if (list? l)
       l
       (fix-list l)))
+(define (pass-list-index v ls)
+  (for/or ([y ls] [i (in-naturals)] #:when (eq? v y)) i))
 
 (define gen-qsym gensym)
 (define gen-ssym gensym)
