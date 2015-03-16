@@ -53,7 +53,7 @@
                       (not (list? expr))
                       (memq (car expr) *keywords*))
                   (error "bad expression" expr)
-                  (cons (core-form (car expr)) (core-form (cdr expr))))])
+                  (cons (core-form (car expr)) (core-convert-list (cdr expr))))])
       (match expr
         [(? symbol? e) e]             ; symbol is passed over straight
         [(or (? number? e)            ; numbers, booleans, strings and chars are quoted
