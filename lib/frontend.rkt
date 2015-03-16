@@ -22,41 +22,45 @@
   '(quote begin set! lambda if))
     
 (define (core-form expr)
-  (match expr
-    [`(quote ,obj) `(quote ,obj)] ; quote objects continue unaltered
-    [`(begin ,e0) (core-form e0)] ; begin with one expression is simplified
-    [`(begin ,e0 ,e* ..1)         ; begin with two or more expressions is iterated
-     (let ([new-e0 (core-form e0)]
-           [new-e* (core-form `(begin ,@e*))])
-       `(begin ,new-e0 ,new-e*))]
-    [`(if ,t ,c ,a)               ; if is iterated
-     (let ([new-t (core-form t)]
-           [new-c (core-form c)]
-           [new-a (core-form a)])
-       `(if ,new-t ,new-c ,new-a))]
-    [`(set! ,v ,e)                ; set! is checked for a symbol and an expression,
-     (if (symbol? v)              ; then iterated over the expression
-         `(set! ,v ,(core-form e))
-         (error "bad expression" expr))]
-    [`(lambda ,formals . ,bodies) ; lambda has formals list fixed, checked and body iterated over 
-     (let ([pformals (proper-list formals)]) ;; TODO check if list fix allows for varargs (probably not)
-       (if (and (andmap symbol? pformals)
-                (andmap (lambda (x) (not memq x *keywords*)) pformals)
-                (set? pformals))
-           (let ([new-body (core-form `(begin ,@bodies))])
-             `(lambda ,formals ,new-body))
-           (error "bad formals ~s in ~s" formals exp)))]
-    [(? pair? p)                  ; pair is checked for keywords and null
-     (if (or (memq (car p) *keywords*)
-             (null? exp))
-         (error "bad expression" expr)
-         `(,(core-form (car p)) . ,(core-form (cdr p))))]
-    [(? symbol? e) e]             ; symbol is passed over straight
-    [(or (? number? e)            ; numbers, booleans, strings and chars are quoted
-         (? boolean? e)
-         (? string? e)
-         (? char? e)) `(quote ,e)]
-    [else (error "bad expression" expr)])) ; else expression is invalid
+  (if (pair? expr)
+      (match expr
+        [`(quote ,obj) `(quote ,obj)] ; quote objects continue unaltered
+        [`(begin ,e0 . ,exps)
+         (if (null? exps)
+             (core-form e0)         ; begin with two or more expressions is iterated
+             (let ([new-e0 (core-form e0)]
+                   [new-e* (core-form `(begin ,exps))])
+               `(begin ,new-e0 ,new-e*)))]
+        [`(if ,t ,c ,a)               ; if is iterated
+         (let ([new-t (core-form t)]
+               [new-c (core-form c)]
+               [new-a (core-form a)])
+           `(if ,new-t ,new-c ,new-a))]
+        [`(set! ,v ,e)                ; set! is checked for a symbol and an expression,
+         (if (symbol? v)              ; then iterated over the expression
+             `(set! ,v ,(core-form e))
+             (error "bad expression" expr))]
+        [`(lambda ,formals ,bodies ...) ; lambda has formals list fixed, checked and body iterated over 
+         (let ([pformals (proper-list formals)]) ;; TODO check if list fix allows for varargs (probably not)
+           (if (and (andmap symbol? pformals)
+                    (andmap (lambda (x) (not (memq x *keywords*))) pformals)
+                    (is-set? pformals))
+               (let ([new-body (core-form `(begin ,@bodies))])
+                 `(lambda ,formals ,new-body))
+               (error (format "bad formals ~s in ~s" formals exp))))]
+        [`(,val) (core-form val)]
+        [else (if (or (null? expr)
+                      (not (list? expr))
+                      (memq (car expr) *keywords*))
+                  (error "bad expression" expr)
+                  (cons (core-form (car expr)) (core-form (cdr expr))))])
+      (match expr
+        [(? symbol? e) e]             ; symbol is passed over straight
+        [(or (? number? e)            ; numbers, booleans, strings and chars are quoted
+             (? boolean? e)
+             (? string? e)
+             (? char? e)) `(quote ,e)]
+        [else (error "bad expression" expr)]))) ; else expression is invalid
 
 (define (core-convert-list lst)
   (map core-form lst))
@@ -217,6 +221,9 @@
       (fix-list l)))
 (define (pass-list-index v ls)
   (for/or ([y ls] [i (in-naturals)] #:when (eq? v y)) i))
-
+(define (is-set? ls)
+  (or (null? ls)
+      (and (not (memq (car ls) (cdr ls)))
+           (is-set? (cdr ls)))))
 (define gen-qsym gensym)
 (define gen-ssym gensym)
