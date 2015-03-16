@@ -42,3 +42,5 @@
   (exp? exp 'begin))
 (define (define-exp? exp)
   (exp? exp 'define))
+
+(provide (all-defined-out))
