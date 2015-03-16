@@ -227,3 +227,5 @@
            (is-set? (cdr ls)))))
 (define gen-qsym gensym)
 (define gen-ssym gensym)
+
+(provide (all-defined-out))
