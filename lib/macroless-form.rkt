@@ -116,6 +116,23 @@
                     (my-expand r env)))])
       exp))
 
+(define macroexpand-1
+  (lambda (exp . opt-env)
+    (let ([env (if (null? opt-env) (current-namespace) (car opt-env))])
+      exp)))
+
+(define macroexpand
+  (lambda args
+    (let loop ([exp (car args)]
+               [expanded (macroexpand-1 (car args) (if (null? (cdr args))
+                                                       (current-namespace)
+                                                       (cdar args)))])
+      (if (eq? expanded exp)
+          expanded
+          (begin
+            (set! exp expanded)
+            (loop))))))
+
 (define (define-macro-exp? exp)
   (exp? exp 'define-macro))
 
