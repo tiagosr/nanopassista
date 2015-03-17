@@ -122,8 +122,9 @@
       `(hashtable/put! all-macros ',def ,@body)))
 (define (macroexpand-1 exp)
   (void))
-(define (expand x mark env rec?)
-  (define (ellipsis? x)
+
+(define (expand x mark env rec?) ; r5rs-like macro expand
+  (define (ellipsis? x) ; matching ...
     (and (pair? x)
          (pair? (cdr x))
          (eqv? (cadr x) '...)))
@@ -183,7 +184,7 @@
                  (if (ellipsis? x)
                      (pm-impl (cons (gen-variety (car x) 0)
                                     (cdr x))
-                              lists
+                              lits
                               (append (flatten (car x)) cand)
                               (cdr x))
                      (pm-impl (cdr x) (cdr y) lits cand (cdr k)))
@@ -202,11 +203,13 @@
           [(ellipsis? template) (let ([transformed (transform (car template) bind)])
                                   (if (equal? (car template) transformed)
                                       (if (pair? (cdr template))
-                                          (transform (cddr template) bind))
+                                          (transform (cddr template) bind)
+                                          (void))
                                       (cons transformed (transform (let ([generated (gen-variety2 (car template) 0 *family*)])
                                                                      (if (equal? generated (car template))
                                                                          (if (pair? (cdr template))
-                                                                             (transform (cddr template) bind))
+                                                                             (transform (cddr template) bind)
+                                                                             (void))
                                                                          (cons generated (cdr template))))))))]
           [(pair? template) (cons (transform (car template) bind)
                                   (transform (cdr template) bind))]
@@ -231,6 +234,7 @@
                 rec?)
             (loop (cdr ptn)
                   (cdr tmpl)))))))
+
 (define (expand-rec x mark env rec?)
   (define (macro? x env)
     (let ([exp (syntax-object-expr x)])
@@ -253,6 +257,40 @@
                [(syn-identifier? x) x]
                [else (cons (expand-rec (car x) mark env rec?)
                            (expand-rec (cdr x) mark env rec?))])]
+        [else x]))
+
+(define (newstrip x)
+  (define (replace-sym sym wrap)
+    (let ([mark* (get-mark* wrap '())]
+          [sbst* (get-subst* wrap '())])
+      (let search ([sbst* sbst*])
+        (if (null? sbst*)
+            sym
+            (let ([sbst (car sbst*)])
+              (if (and (eq? sym (subst-sym sbst))
+                       (memq (subst-mark* sbst) mark*))
+                  (subst-label sbst)
+                  (search (cdr sbst*))))))))
+  (define (get-mark* wrap acc)
+    (if (null? wrap)
+        acc
+        (let ([w (car wrap)])
+          (if (mark? w)
+              (get-mark* (cdr wrap) (cons w acc))
+              (get-mark* (cdr wrap) acc)))))
+  (define (get-subst* wrap acc)
+    (if (null? wrap)
+        acc
+        (let ([w (car wrap)])
+          (if (subst? w)
+              (get-subst* (cdr wrap) (cons w acc))
+              (get-subst* (cdr wrap) acc)))))
+  (cond [(syntax-object? x)
+         (if (syn-identifier? x)
+             (replace-sym (syntax-object-expr x)
+                          (syntax-object-wrap x))
+             (newstrip (syntax-object-expr x)))]
+        [(pair? x) (cons (newstrip (car x)) (newstrip (cdr x)))]
         [else x]))
 
 (define *family* '())
