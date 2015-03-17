@@ -116,10 +116,147 @@
                     (my-expand r env)))])
       exp))
 
-(define macroexpand-1
-  (lambda (exp . opt-env)
-    (let ([env (if (null? opt-env) (current-namespace) (car opt-env))])
-      exp)))
+(define (my-define-macro def . body)
+  (if (pair? def)
+      `(my-define-macro ,(car def) (lambda ,(cdr def) ,@body))
+      `(hashtable/put! all-macros ',def ,@body)))
+(define (macroexpand-1 exp)
+  (void))
+(define (expand x mark env rec?)
+  (define (ellipsis? x)
+    (and (pair? x)
+         (pair? (cdr x))
+         (eqv? (cadr x) '...)))
+  (define (gen-variety x d)
+    (cond [(symbol? x)
+           (if (eqv? x '...)
+               '...
+               (string->symbol (string-append (symbol->string x)
+                                              "_"
+                                              (number->string d))))]
+          [(pair? x)
+           (if (ellipsis? x)
+               (cons (gen-variety (car x) (+ 1 d))
+                     (gen-variety (cdr x) d))
+               (cons (gen-variety (car x) d)
+                     (gen-variety (cdr x) d)))]
+          [else x]))
+  (define (gen-variety2 x d lst)
+    (cond [(symbol? x)
+           (if (eqv? x '...)
+               '...
+               (let ([new (string->symbol (string-append (symbol->string x)
+                                                         "_"
+                                                         (number->string d)))])
+                 (if (and (memq x lst) (memq new lst))
+                     new
+                     x)))]
+          [(pair? x)
+           (if (ellipsis? x)
+               (cons (gen-variety2 (car x) (+ 1 d) lst)
+                     (gen-variety2 (cdr x) d lst))
+               (cons (gen-variety2 (car x) d lst)
+                     (gen-variety2 (cdr x) d lst)))]
+          [else x]))
+  (define (add-family x)
+    (set! *family* (set-union x *family*))
+    *family*)
+  (define (pmatch x y lits)
+    (let ([family '()])
+      (let ([add-family (lambda (x) (set! family (set-union x family)) family)])
+        (pm-impl x y lits '() '()))))
+  (define (varsym? x lits)
+    (and (symbol? x) (not (memq x lits))))
+  (define (pm-impl x y lits cand bn)
+    (cond [(or (eqv? x y)
+               (eqv? x '_)
+               (eqv? y '_))
+           (begin (add-family cand)
+                  (cons #t bn))]
+          [(varsym? x lits)
+           (begin (add-family cand)
+                  (cons #t (cons (cons x y) bn)))]
+          [(and (pair? x)
+                (pair? y))
+           (let ([k (pm-impl (car x) (car y) lits cand bn)])
+             (if (car k)
+                 (if (ellipsis? x)
+                     (pm-impl (cons (gen-variety (car x) 0)
+                                    (cdr x))
+                              lists
+                              (append (flatten (car x)) cand)
+                              (cdr x))
+                     (pm-impl (cdr x) (cdr y) lits cand (cdr k)))
+                     (cons #f #f)))]
+          [(and (null? y)
+                (ellipsis? x))
+           (begin (add-family cand)
+                  (cons #t bn))]
+          [#t (begin (add-family cand)
+                     (cons #f #f))]))
+  (define (transform template bind)
+    (cond [(symbol? template) (let ([r (assq template bind)])
+                                (if r
+                                    (cdr r)
+                                    template))]
+          [(ellipsis? template) (let ([transformed (transform (car template) bind)])
+                                  (if (equal? (car template) transformed)
+                                      (if (pair? (cdr template))
+                                          (transform (cddr template) bind))
+                                      (cons transformed (transform (let ([generated (gen-variety2 (car template) 0 *family*)])
+                                                                     (if (equal? generated (car template))
+                                                                         (if (pair? (cdr template))
+                                                                             (transform (cddr template) bind))
+                                                                         (cons generated (cdr template))))))))]
+          [(pair? template) (cons (transform (car template) bind)
+                                  (transform (cdr template) bind))]
+          [else template]))
+  (let* ([stript (newstrip (car x))]
+         [lits (literals stript x)]
+         [isom (synobj-isomorph (normalize-obj (add-mark mark x)) lits)])
+    (let loop ([ptn (patterns stript env)]
+               [tmpl (templates stript env)])
+      (if (null? ptn)
+          x
+          (let ([r (pmatch (car ptn)
+                           (cdr isom) lits)])
+            (if (car r)
+                (expand-rec (newstrip (normalize-synobj (add-mark mark (transform (transform (car impl)
+                                                                                             (cdr r))
+                                                                                  (car isom))))))
+                mark
+                (if rec?
+                    env
+                    (syntax-env stript env))
+                rec?)
+            (loop (cdr ptn)
+                  (cdr tmpl)))))))
+(define (expand-rec x mark env rec?)
+  (define (macro? x env)
+    (let ([exp (syntax-object-expr x)])
+      (and (pair? exp)
+           (find-syntax (car exp) env))))
+  (define (quote x)
+    (and (pair? x)
+         (eqv? 'quote car x)))
+  
+  (cond [(symbol? x) x]
+        [(quote? x) x]
+        [(pair? x)
+         (cond [(binding-exp? x)
+                (expand-binding x mark env rec?)]
+               [(macro? x env)
+                (let ([newmark (make-mark)])
+                  (expand x newmark env rec?))]
+               [(or (eqv? 'define-syntax (car x))
+                    (eqv? 'syntax-rules (car x))) x]
+               [(syn-identifier? x) x]
+               [else (cons (expand-rec (car x) mark env rec?)
+                           (expand-rec (cdr x) mark env rec?))])]
+        [else x]))
+
+(define *family* '())
+(define *syntaxes* '())
 
 (define macroexpand
   (lambda args
