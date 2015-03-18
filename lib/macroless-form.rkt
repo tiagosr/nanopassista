@@ -296,6 +296,70 @@
 (define *family* '())
 (define *syntaxes* '())
 
+(define (find-syntax x env)
+  (assq x env))
+
+(define (literals x env)
+  (cadr (find-syntax x env)))
+
+(define (patterns x env)
+  (caddr (find-syntax x env)))
+
+(define (templates x env)
+  (cadddr (find-syntax x env)))
+
+(define (syntax-env x env)
+  (let ([e (car (cddddr (find-syntax x env)))])
+    (if (null? e)
+        *syntaxes*
+        e)))
+
+(define (make-syntax-object exp wrap)
+  (if (self-evaluating? exp)
+      exp
+      (cons '*syntax-object* (cons exp wrap))))
+
+(define (syntax-object? x)
+  (and (pair? x)
+       (eq? (car x) '*syntax-object*)
+       (pair? (cdr x))))
+
+(define (syntax-object-expr x)
+  (if (syntax-object? x)
+      (cadr x)
+      x))
+
+(define (syntax-object-wrap x)
+  (if (syntax-object? x)
+      (cddr x)
+      x))
+
+
+
+(define (synobj-isomorph x lits)
+  (define synobj-id
+    (let ([n 0])
+      (lambda ()
+        (set! n (+ 1 n))
+        (string->symbol (string-append "syn." (number->string n))))))
+  (define (synobj-isomorph-impl exp lits)
+    (let ([x (cdr exp)]
+          [b (car exp)])
+      (cond [(null? x) (cons b '())]
+            [(and (pair? x)
+                  (syntax-object? x))
+             (let ([id (synobj-id)]
+                   [sym (syntax-object-expr x)])
+               (if (memq sym lits)
+                   (cons (cons (cons sym x) b) sym)
+                   (cons (cons (cons id  x) b) id)))]
+            [(pair x)
+             (let ([kar (synobj-isomorph-impl (cons b (car x)) lits)]
+                   [kdr (synobj-isomorph-impl (cons b (cdr x)) lits)])
+               (cons (append b (car kar) (cdr kdr))))]
+            [else (cons b x)])))
+  (synobj-isomorph-impl (cons '() x) lits))
+
 (define macroexpand
   (lambda args
     (let loop ([exp (car args)]
