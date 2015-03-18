@@ -123,6 +123,54 @@
 (define (macroexpand-1 exp)
   (void))
 
+
+(define (set-global-syntax name x env)
+  (let ([defpair (make-syntax-def name x '())]
+        [r       (assq name *syntaxes*)])
+    (if r
+        (set-cdr! r (cdr defpair))
+        (set! *syntaxes* (cons defpair *syntaxes*)))
+    (if #f #t)))
+
+(define (let-syntax-imp x env)
+  (let loop ([bindings (cadr x)]
+             [newenv '()])
+    (if (null? bindings)
+        (append newenv env)
+        (let ([keyword (caar bindings)]
+              [trnsfrm (cadar bindings)])
+          (loop (cdr bindings) (cons (make-syntax-def keyword trnsfrm env) env))))))
+
+(define (letrec-syntax-imp x env)
+  (define (backpatch-env! x env)
+    (if (not (null? x))
+        (begin
+          (if (eqv? '%PLACEHOLDER% (car (cddddr (car x))))
+              (set-cdr! (cddddr (car x)) env)
+              *undefined*)
+          (backpatch-env! (cdr x)
+                          env))
+        *undefined*))
+  (let loop ([bindings (cadr x)]
+             [newenv '()])
+    (if (null? bindings)
+        (let ([x (append newenv env)])
+          (backpatch-env! x x)
+          x)
+        (let ([keyword (caar bindings)]
+              [trnsfrm (cadar bindings)])
+          (loop (cdr bindings)
+                (cons (make-syntax-def keyword trnsfrm '%PLACEHOLDER%) newenv))))))
+
+
+
+(define (make-syntax-def name x env)
+  (let ([syms (cadr x)]
+        [patterns (map car (cddr x))]
+        [templates (map cadr (cddr x))])
+    (let ([def (list syms patterns templates env)])
+      (cons name def))))
+
 (define (expand x mark env rec?) ; r5rs-like macro expand
   (define (ellipsis? x) ; matching ...
     (and (pair? x)
@@ -216,7 +264,7 @@
           [else template]))
   (let* ([stript (newstrip (car x))]
          [lits (literals stript x)]
-         [isom (synobj-isomorph (normalize-obj (add-mark mark x)) lits)])
+         [isom (synobj-isomorph (normalize-synobj (add-mark mark x)) lits)])
     (let loop ([ptn (patterns stript env)]
                [tmpl (templates stript env)])
       (if (null? ptn)
@@ -224,23 +272,23 @@
           (let ([r (pmatch (car ptn)
                            (cdr isom) lits)])
             (if (car r)
-                (expand-rec (newstrip (normalize-synobj (add-mark mark (transform (transform (car impl)
+                (expand-rec (newstrip (normalize-synobj (add-mark mark (transform (transform (car tmpl)
                                                                                              (cdr r))
-                                                                                  (car isom))))))
-                mark
-                (if rec?
-                    env
-                    (syntax-env stript env))
-                rec?)
-            (loop (cdr ptn)
-                  (cdr tmpl)))))))
+                                                                                  (car isom)))))
+                            mark
+                            (if rec?
+                                env
+                                (syntax-env stript env))
+                            rec?)
+                (loop (cdr ptn)
+                      (cdr tmpl))))))))
 
 (define (expand-rec x mark env rec?)
   (define (macro? x env)
     (let ([exp (syntax-object-expr x)])
       (and (pair? exp)
            (find-syntax (car exp) env))))
-  (define (quote x)
+  (define (quote? x)
     (and (pair? x)
          (eqv? 'quote car x)))
   
@@ -334,7 +382,77 @@
       (cddr x)
       x))
 
+(define *make-mark-num* 0)
+(define (make-mark)
+  (set! *make-mark-num* (+ *make-mark-num* 1))
+  (string->symbol (string-append "mark." (number->string *make-mark-num*))))
+(define (mark? x)
+  (and (symbol? x)
+       (let ([str (symbol->string x)])
+         (and (<= 5 (string-length str))
+              (string=? (substring str 0 5)
+                        "mark.")))))
 
+(define top-mark (make-mark))
+
+(define (top-marked? wrap)
+  (and (not (null? wrap))
+       (or (eq? (car wrap) top-mark)
+           (top-marked? (cdr wrap)))))
+
+(define (make-subst id mark* label)
+  (cons '*substitute* (cons id (cons mark* label))))
+
+(define (subst? x)
+  (and (pair? x)
+       (eq? (car x) '*substitute*)))
+
+(define (subst-sym x)
+  (if (subst? x)
+      (cadr x)
+      x))
+
+(define (subst-mark* x)
+  (if (subst? x)
+      (caddr x)
+      x))
+
+(define (subst-label x)
+  (if (subst? x)
+      (cadddr x)
+      x))
+
+(define (add-mark mark x)
+  (extend-wrap (list mark) x))
+
+(define (extend-wrap wrap x)
+  (define (join-wraps wrap1 wrap2)
+    (cond [(null? wrap1) wrap2]
+          [(null? wrap2) wrap1]
+          [else
+           (let f ([w (car wrap1)]
+                   [w* (cdr wrap1)])
+             (if (null? w*)
+                 (if (and (mark? w)
+                          (eq? (car wrap2) w))
+                     (cdr wrap2)
+                     (cons w wrap2))
+                 (cons w (f (car w*) (cdr w*)))))]))
+  (if (syntax-object? x)
+      (make-syntax-object
+       (syntax-object-expr x)
+       (join-wraps wrap (syntax-object-wrap x)))
+      (make-syntax-object x wrap)))
+
+(define (normalize-synobj x)
+  (if (syntax-object? x)
+      (let ([exp (syntax-object-expr x)]
+            [wrp (syntax-object-wrap x)])
+        (cond [(null? exp) '()]
+              [(pair? exp) (cons (normalize-synobj (extend-wrap wrp (car exp)))
+                                 (normalize-synobj (extend-wrap wrp (cdr exp))))]
+              [else (extend-wrap wrp exp)]))
+      x))
 
 (define (synobj-isomorph x lits)
   (define synobj-id
@@ -345,20 +463,70 @@
   (define (synobj-isomorph-impl exp lits)
     (let ([x (cdr exp)]
           [b (car exp)])
-      (cond [(null? x) (cons b '())]
+      (cond [(null? x) (cons 'b '())]
             [(and (pair? x)
                   (syntax-object? x))
-             (let ([id (synobj-id)]
+             (let ([id  (synobj-id)]
                    [sym (syntax-object-expr x)])
                (if (memq sym lits)
                    (cons (cons (cons sym x) b) sym)
                    (cons (cons (cons id  x) b) id)))]
-            [(pair x)
-             (let ([kar (synobj-isomorph-impl (cons b (car x)) lits)]
-                   [kdr (synobj-isomorph-impl (cons b (cdr x)) lits)])
-               (cons (append b (car kar) (cdr kdr))))]
+            [(pair? x) (let ([kar (synobj-isomorph-impl (cons b (car x)) lits)]
+                             [kdr (synobj-isomorph-impl (cons b (car x)) lits)])
+                         (cons (append b (car kar) (car kdr))
+                               (cons (cdr kar) (cdr kdr))))]
             [else (cons b x)])))
   (synobj-isomorph-impl (cons '() x) lits))
+
+(define (self-evaluating? x)
+  (or (boolean? x) (number? x) (string? x) (char? x)))
+
+(define (binding-exp? x)
+  (cond [(syntax-object? x) (binding-exp? (syntax-object-expr x))]
+        [(pair? x) (or (and (syntax-object? (car x))
+                            (eq? (syntax-object-expr (car x)) 'lambda))
+                       (and (eq? (car x) 'lambda)
+                            (pair? (cdr x))))]
+        [else #f]))
+
+(define (syn-identifier? x)
+  (and (syntax-object? x)
+       (symbol? (syntax-object-expr) x)))
+
+(define *gen-var-num* 0)
+(define (gen-var id)
+  (set! *gen-var-num* (+ *gen-var-num* 0))
+  (let ([name (syntax-object-expr id)])
+    (string->symbol (string-append (symbol->string name) "." (number->string *gen-var-num*)))))
+
+(define (expand-binding x mark env rec?)
+  (define (add-subst id mark label x)
+    (extend-wrap (list (make-subst (syntax-object-expr id) mark label)) x))
+  (define (add-subst-and-mark bind exp mark)
+    (if (null? bind)
+        (normalize-synobj (add-mark mark exp))
+        (add-subst-and-mark (cdr bind)
+                            (add-subst (car bind)
+                                       mark
+                                       (gen-var (syntax-object-expr (car bind)))
+                                       exp)
+                            mark)))
+  (define (get-bind x)
+    (let ([bind (syntax-object-expr (cadr x))])
+      (if (symbol? bind)
+          (list bind)
+          (flatten bind))))
+  (let ([newmark (make-mark)]
+        [bind    (get-bind x)])
+    (let ([expanded (newstrip (add-subst-and-mark (syntax-object-expr bind)
+                                                  (newstrip x)
+                                                  newmark))])
+      (cons (car expanded) (cons (cadr expanded)
+                                 (expand-rec (cddr expanded) newmark env rec?))))))
+
+(define (macro-names x)
+  (map car x))
+
 
 (define macroexpand
   (lambda args
