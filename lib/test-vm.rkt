@@ -183,3 +183,5 @@
   (if *debug-flag*
       (apply format *debug-out-port* frmt args)
       (void)))
+
+(provide (all-defined-out))
