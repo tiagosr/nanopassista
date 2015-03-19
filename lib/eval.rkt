@@ -2,6 +2,7 @@
 
 (require "util.rkt")
 (require "test-vm.rkt")
+(require "macroless-form.rkt")
 
 (define *builtin-fn-names*
   '(+ - * / < > = <= >= modulo remainder quotient

@@ -129,9 +129,9 @@
   (let ([defpair (make-syntax-def name x '())]
         [r       (assq name *syntaxes*)])
     (if r
-        (set-cdr! r (cdr defpair))
+        (set! *syntaxes* (replace *syntaxes* r defpair)) ; (set-cdr! r (cdr defpair))
         (set! *syntaxes* (cons defpair *syntaxes*)))
-    (if #f #t)))
+    (void)))
 
 (define (let-syntax-imp x env)
   (let loop ([bindings (cadr x)]
