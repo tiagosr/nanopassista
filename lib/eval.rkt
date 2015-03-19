@@ -37,6 +37,19 @@
     
     ))
 
+(define *builtin-fns*
+  (let* ([procs *builtin-fn-names*]
+         [prcs  (make-vector (+ 3 (length procs)))])
+    (vector-set! prcs 0 'type)
+    (vector-set! prcs 1 'argnum)
+    (vector-set! prcs 2 'body)
+    (let loop ([i 3]
+               [p procs])
+      (unless (null? p)
+        (vector-set! i (car p))
+        (loop (+ i 1) (cdr p)))
+      prcs)))
+
 (define (run x)
   (let ([envs (cons '() *builtin-fn-names*)])
     (let ([code (compile (expand-qq (macroexpand x))
@@ -44,7 +57,7 @@
                          '()
                          '(halt))])
       ;(output-globals)
-      (*vm* '() code 0 *builtin-fn* 0 0))))
+      (*vm* '() code 0 *builtin-fns* 0 0))))
 
 (define (p1 x) ; phase 1
   (compile (expand-qq (macroexpand x))
@@ -59,8 +72,7 @@
            '(halt)))
 
 (define (vmrun code)
-  (*vm* '() code 0 *builtin-fn* 0 0))
-
+  (*vm* '() code 0 *builtin-fns* 0 0))
 (define (macroexpand x)
   (expand-rec x top-mark *syntaxes* #f))
 
