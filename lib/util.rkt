@@ -1,6 +1,6 @@
 #lang racket
 
-; (define *undefined* (undefined)) ; kind of poetic
+(define *void* (void)) ; kind of poetic
 
 #|
  | sets
@@ -82,6 +82,19 @@
 
 (define (caddddr lst)
   (car (cddddr lst)))
+
+(define (replace-patch-rec lst ptr thing)
+  (let ([ptr (reverse (string->list (symbol->string ptr)))])
+    (let loop ([lst lst]
+               [p (car ptr)]
+               [rem (cdr ptr)])
+      (if (<= (length rem) 0)
+          (cond [(eq? p #\a) (cons thing (cdr lst))]
+                [(eq? p #\d) (cons (car lst) thing)]
+                [else (error "bad direction ~A" p)]) 
+          (cond [(eq? p #\a) (cons (loop (car lst) (car rem) (cdr rem)) (cdr lst))]
+                [(eq? p #\d) (cons (car lst) (loop (cdr lst) (car rem) (cdr rem)))]
+                [else (error "bad direction ~A" p)])))))
 
 ; string utility functions
 

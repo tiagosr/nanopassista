@@ -145,18 +145,18 @@
 (define (letrec-syntax-imp x env)
   (define (backpatch-env! x env)
     (if (not (null? x))
-        (begin
+        (let ([x x])
           (if (eqv? '%PLACEHOLDER% (car (cddddr (car x))))
-              (set-cdr! (cddddr (car x)) env)
-              *undefined*)
+              (set! x (replace-patch-rec 'dddda x env))
+              (void))
           (backpatch-env! (cdr x)
                           env))
-        *undefined*))
+        (void)))
   (let loop ([bindings (cadr x)]
              [newenv '()])
     (if (null? bindings)
         (let ([x (append newenv env)])
-          (backpatch-env! x x)
+          (backpatch-env! x env)
           x)
         (let ([keyword (caar bindings)]
               [trnsfrm (cadar bindings)])
