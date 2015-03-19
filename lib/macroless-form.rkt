@@ -1,4 +1,5 @@
 #lang racket
+(require "util.rkt")
 (require "local-form.rkt")
 
 (define library

@@ -153,4 +153,33 @@
   (vector-ref *globals-v* i))
 
 (define (show-globals)
-  (print #t "~% [g] --- ~A~%" *globals-v*))
+  (trace #t "~% [g] --- ~A~%" *globals-v*))
+
+; debugging
+
+(define *debug-flag*     #f)
+(define *output-globals* #f)
+(define *debug-out-port* #t)
+(define *show-stack*     #t)
+(define *show-reg-c*     #t)
+
+
+(define (show-reg a x f c s pc)
+  (trace #t "~% [a] | ~A~% [x] |  ~A~% [pc] |  ~A~% [f] | ~A~% [c] | ~A~% [s]"
+         a x pc f (if *show-reg-c* c ""))
+  (if *show-stack*
+      (ins-st s)
+      #f))
+
+(define (ins-st p)
+  (trace #t "=> ~3@A [           ]~%" p)
+  (let loop ([i p])
+    (unless (or (< i 1)
+                (< (+ i 1) p))
+      (trace #t "               ~A [ ~10@A ]~%" (- i 1) (index p (- p i)))
+      (loop (- i 1)))))
+
+(define (trace opt frmt . args)
+  (if *debug-flag*
+      (apply format *debug-out-port* frmt args)
+      (void)))
