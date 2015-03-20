@@ -74,8 +74,6 @@
 
 (define (vmrun code)
   (*vm* '() code 0 *builtin-fns* 0 0))
-(define (macroexpand x)
-  (expand-rec x top-mark *syntaxes* #f))
 
 (define (expand-qq x)
   (cond [(pair? x)
@@ -121,7 +119,7 @@
               (qq? x))
          (cons (qqi 'quasiquote qql uql)
                (list (qq (cdr x) (+ 1 qql) uql)))]
-        [(and (pair x)
+        [(and (pair? x)
               (pair? (car x))
               (not (unq? (car x)))
               (not (uqs? (car x)))

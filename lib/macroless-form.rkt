@@ -4,64 +4,151 @@
 
 (define library
   '(
-    (define-macro let
-      (lambda (decls . bodies)
-        (if (pair? decls)
-            (let ([vars (map car decls)] ; anonymous let
-                  [vals (map cadr decls)])
-              `((lambda ,vars ,@bodies) vals))
-            (let ([vars (map car (car bodies))] ; named let
-                  [vals (map cadr (car bodies))])
-              `(letrec ([,decls (lambda ,vars ,@(cdr bodies))])
-                 (,decls ,@vals))))))
+    (define-syntax define-syntax-rule
+      (syntax-rules ()
+        ((define-syntax-rule (name . pattern) template)
+         (define-syntax name
+           (syntax-rules ()
+             ((name . pattern) template))))))
     
-    (define-macro let*
-      (lambda (decls . bodies)
-        (if (null? (cdr decls))
-            `(let (,(car decls)) ,@bodies)
-            `(let (,(car decls)) (let* ,(cdr decls) ,@bodies)))))
+    (define-syntax when
+        (syntax-rules ()
+          ((_ pred b1 ...)
+           (if pred (begin b1 ...)))))
     
-    (define-macro letrec
-      (lambda (decls . bodies)
-        (let ([vars (map car decls)]
-              [vals (map cadr decls)])
-          (let ([holders (map (lambda (x) #f) vars)]
-                [assigns (map (lambda (v e) `(set! ,v e)) vars vals)])
-            `((lambda ,vars ,@assigns ,@bodies) ,@holders)))))
+    (define-syntax unless
+        (syntax-rules ()
+          ((_ pred b1 ...)
+           (if (not pred)
+               (begin
+                 b1 ...)))))
     
-    (define-macro cond
-      (lambda args
-        (if (null? args)
-            #f
-            (if (eq? (caar args) 'else)
-                `(begin ,@(cdar args))
-                (if (null? (cdar args))
-                    `(let ([+value+ ,(caar args)])
-                       (if +value+ +value+ (cond ,@(cdr args))))
-                    `(if ,(caar args)
-                         (begin ,@(cdar args))
-                         (cond ,@(cdr args))))))))
+    (define-syntax or
+        (syntax-rules ()
+          ((or) #f)
+          ((or test) test)
+          ((or test1 test2 ...)
+           (let ((x test1))
+             (if x x (or test2 ...))))))
     
-    (define-macro do
-      (lambda (var-form test-form . args)
-        (let ([vars (map car var-form)]
-              [vals (map cadr var-form)]
-              [step (map cddr var-form)])
-          `(letrec ([loop (lambda ,vars
-                            (if ,(car test-form)
-                                (begin ,@(cdr test-form))
-                                (begin
-                                  ,@args
-                                  (loop ,@(map (lambda (x y)
-                                                 (if (null? x)
-                                                     y
-                                                     (car x)))
-                                               step vars)))))]) (loop ,@vals)))))
+    (define-syntax and
+        (syntax-rules ()
+          ((and) #t)
+          ((and test) test)
+          ((and test1 test2 ...)
+           (if test1 (and test2 ...) #f))))
     
-    (define caar (lambda (x) (car (car x))))
-    (define cadr (lambda (x) (car (cdr x))))
-    (define cdar (lambda (x) (cdr (car x))))
-    (define cddr (lambda (x) (cdr (cdr x))))
+    (define-syntax letrec
+        (syntax-rules()
+          [(letrec ((fn def) ...) body ...)
+           (let ((fn *undefined*) ...)
+             (set! fn def) ...
+             body ...)]))
+    
+    (define-syntax let
+        (syntax-rules ()
+          ((let ([name val] ...) body1 body2 ...)
+           ((lambda (name ...)
+              (begin
+                body1
+                body2 ...))
+            val ...))
+          ((let tag ([name val] ...)
+               body1
+               body2 ...)
+           ((letrec ([tag (lambda (name ...)
+                            (begin body1 body2 ...))])
+              tag)
+            val ...))))
+    
+    (define-syntax let*
+        (syntax-rules ()
+          ((let* () body1 body2 ...)
+           (let () body1 body2 ...))
+          ((let* ((name1 val1) (name2 val2) ...)
+             body1 body2 ...)
+           (let ((name1 val1))
+             (let* ((name2 val2) ...)
+               body1 body2 ...)))))
+    
+    (define-syntax case
+        (syntax-rules (else)
+          ((case (key ...)
+             clauses ...)
+           (let ((atom-key (key ...)))
+             (case atom-key clauses ...)))
+          ((case key
+             (else result1 result2 ...))
+           (begin result1 result2 ...))
+          ((case key
+             ((atoms ...) result1 result2 ...))
+           (if (memv key '(atoms ...))
+               (begin result1 result2 ...)))
+          ((case key
+             ((atoms ...) result1 result2 ...)
+             clause clauses ...)
+           (if (memv key '(atoms ...))
+               (begin result1 result2 ...)
+               (case key clause clauses ...)))))
+    
+    (define-syntax cond
+        (syntax-rules (else =>)
+          ((cond (else result1 result2 ...))
+           (begin result1 result2 ...))
+          ((cond (test => result))
+           (let ((temp test))
+             (if temp (result temp))))
+          ((cond (test => result) clause1 clause2 ...)
+           (let ((temp test))
+             (if temp
+                 (result temp)
+                 (cond clause1 clause2 ...))))
+          ((cond (test)) test)
+          ((cond (test) clause1 clause2 ...)
+           (let ((temp test))
+             (if temp
+                 temp
+                 (cond clause1 clause2 ...))))
+          ((cond (test result1 result2 ...))
+           (if test (begin result1 result2 ...)))
+          ((cond (test result1 result2 ...)
+                 clause1 clause2 ...)
+           (if test
+               (begin result1 result2 ...)
+               (cond clause1 clause2 ...)))))
+    
+    (define-syntax do
+        (syntax-rules ()
+          ((do ((var init step ...) ...)
+               (test expr ...)
+             command ...)
+           (letrec
+               ((loop
+                 (lambda (var ...)
+                   (if test
+                       (begin
+                         *undefined*
+                         expr ...)
+                       (begin
+                         command
+                         ...
+                         (loop (do 'step//// var step ...)
+                               ...))))))
+             (loop init ...)))
+          ((do 'step//// x)
+           x)
+          ((do 'step//// x y)
+           y)))
+    
+    (define-syntax delay
+        (syntax-rules ()
+          ((delay expression)
+           (make-promise (lambda () expression)))))
+    
+    (define caar  (lambda (x) (car (car x))))
+    (define cadr  (lambda (x) (car (cdr x))))
+    (define cdar  (lambda (x) (cdr (car x))))
+    (define cddr  (lambda (x) (cdr (cdr x))))
     (define caaar (lambda (x) (car (car (car x)))))
     (define caadr (lambda (x) (car (car (cdr x)))))
     (define cadar (lambda (x) (car (cdr (car x)))))
@@ -72,6 +159,8 @@
     (define cdddr (lambda (x) (cdr (cdr (cdr x)))))
     
     (define list (lambda x x))
+    
+    
     
     
 
@@ -87,7 +176,7 @@
       exp
       `(begin ,@(remove define-macro-exp? (expand-top-level (cdr exp))))))
 
-(define (append-library exp) ; shouldn't it be prepend-library?
+(define (prepend-library exp)
   (if (begin-exp? exp)
       `(begin ,@library ,@(cdr exp))
       `(begin ,@library ,exp)))
@@ -129,8 +218,8 @@
   (let ([defpair (make-syntax-def name x '())]
         [r       (assq name *syntaxes*)])
     (if r
-        (set! *syntaxes* (replace *syntaxes* r defpair)) ; (set-cdr! r (cdr defpair))
-        (set! *syntaxes* (cons defpair *syntaxes*)))
+        (set! *syntaxes* (replace *syntaxes* r defpair)) ; replace the previously placed syntax with a new one
+        (set! *syntaxes* (cons defpair *syntaxes*))) ; place the syntax at the beginning of the list
     (void)))
 
 (define (let-syntax-imp x env)
@@ -529,17 +618,8 @@
   (map car x))
 
 
-(define macroexpand
-  (lambda args
-    (let loop ([exp (car args)]
-               [expanded (macroexpand-1 (car args) (if (null? (cdr args))
-                                                       (current-namespace)
-                                                       (cdar args)))])
-      (if (eq? expanded exp)
-          expanded
-          (begin
-            (set! exp expanded)
-            (loop))))))
+(define (macroexpand x)
+  (expand-rec x top-mark *syntaxes* #f))
 
 (define (define-macro-exp? exp)
   (exp? exp 'define-macro))
