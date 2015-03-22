@@ -30,6 +30,15 @@
 
 (define ws 4)
 
+; register definitions
+(define accum 'd0)
+(define temp1 'd1)
+(define temp2 'd2)
+(define temp3 'd3)
+(define jump-target 'a0)
+(define closure-r   'a1)
+(define frame-ptr   'a6)
+
 (define (encode obj)
   (cond
     [(exact? obj) ;; exact number
@@ -74,7 +83,7 @@
             [`(lambda ,formals ,arity ,body)
              (instructions `(label ,label)
                                 (cg-prologue formals arity)
-                                (cg body (* (+ (length formals) 1) ws) 'ac 'return 'ignored)
+                                (cg body (* (+ (length formals) 1) ws) accum 'return 'ignored)
                                 (cg-code))])))))
 
 ; generates the assembly for each given form
@@ -109,14 +118,33 @@
    `(movl ,(encode obj) ,dd ,(format "~s" obj))
    (cg-jump cd next-label)))
 
+(define (cg-shuffle fs num)
+  (let loop ([top fs]
+             [bottom ws]
+             [num num])
+    (if (zero? num)
+        (instructions)
+        (instructions
+         `(move.l (,frame-ptr ,top) ,temp1)
+         `(move.l ,temp1 (,frame-ptr ,bottom))
+         (loop (+ top ws) (+ bottom ws) (- num 1))))))
+
 ;; assemble the different variations of jumps
 (define (cg-jump label next-label)
   (if (eq? label 'return)
       (instructions
-       `(bra.l (fp 0)))
+       `(bra.l (,frame-ptr 0)))
       (if (eq? label next-label)
           (instructions) ;; nothing (label is the same as the next instruction)
           (instructions `(bra.l ,label)))))
+
+;; assemble a jump that sets up a closure
+(define (cg-jump-closure)
+  (instructions
+   `(move.l ,accum ,closure-r)
+   `(sub.l  ,closure-tag ,closure-r)
+   `(move.l (,closure-r ,(* 1 ws)) ,jump-target)
+   `(jmp   ,jump-target)))
 
 (define (join-labels a b)
   (cond [(pair? a) (join-labels (car a) b)]
