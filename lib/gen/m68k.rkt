@@ -28,15 +28,19 @@
 (define attr-mask #b1111)
 (define attr-len (+ tag-len 1))
 
-(define ws 4)
+(define word-size 4)
 
 ; register definitions
 (define accum 'd0)
 (define temp1 'd1)
 (define temp2 'd2)
 (define temp3 'd3)
-(define jump-target 'a0)
-(define closure-r   'a1)
+(define accum-addr  'a0)
+(define temp1-addr  'a1)
+(define temp2-addr  'a2)
+(define temp3-addr  'a2)
+(define jump-target 'a4)
+(define closure-r   'a5)
 (define frame-ptr   'a6)
 
 (define (encode obj)
@@ -83,22 +87,22 @@
             [`(lambda ,formals ,arity ,body)
              (instructions `(label ,label)
                                 (cg-prologue formals arity)
-                                (cg body (* (+ (length formals) 1) ws) accum 'return 'ignored)
+                                (cg body (* (+ (length formals) 1) word-size) accum 'return 'ignored)
                                 (cg-code))])))))
 
 ; generates the assembly for each given form
-(define (cg exp fs dd cd next-label)
+(define (cg exp frame-size dd cd next-label)
   (match exp
     ;[`(bound ,n ,name) (cg-load-branch 
     [`(quote ,obj)  (cg-set-branch obj dd cd next-label)]
     [`(if ,t ,c ,a) (let ([true-label (gen-label "iftrue")]
                           [false-label (gen-label "iffalse")])
                       (instructions
-                       (cg t fs 'effect (join-labels true-label false-label) true-label)
+                       (cg t frame-size 'effect (join-labels true-label false-label) true-label)
                        `(label ,true-label)
-                       (cg c fs dd cd false-label)
+                       (cg c frame-size dd cd false-label)
                        `(label ,false-label)
-                       (cg a fs dd cd next-label)))]
+                       (cg a frame-size dd cd next-label)))]
     
     ))
 
@@ -115,19 +119,19 @@
 ;; assemble a set-immediate-and-branch instruction sequence (branch automatically optimized)
 (define (cg-set-branch obj dd cd next-label)
   (instructions
-   `(movl ,(encode obj) ,dd ,(format "~s" obj))
+   `(move.l ,(encode obj) ,dd)
    (cg-jump cd next-label)))
 
-(define (cg-shuffle fs num)
-  (let loop ([top fs]
-             [bottom ws]
+(define (cg-shuffle frame-size num)
+  (let loop ([top frame-size]
+             [bottom word-size]
              [num num])
     (if (zero? num)
         (instructions)
         (instructions
          `(move.l (,frame-ptr ,top) ,temp1)
          `(move.l ,temp1 (,frame-ptr ,bottom))
-         (loop (+ top ws) (+ bottom ws) (- num 1))))))
+         (loop (+ top word-size) (+ bottom word-size) (- num 1))))))
 
 ;; assemble the different variations of jumps
 (define (cg-jump label next-label)
@@ -143,9 +147,142 @@
   (instructions
    `(move.l ,accum ,closure-r)
    `(sub.l  ,closure-tag ,closure-r)
-   `(move.l (,closure-r ,(* 1 ws)) ,jump-target)
-   `(jmp   ,jump-target)))
+   `(move.l (,closure-r ,(* 1 word-size)) ,jump-target)
+   `(jmp    ,jump-target)))
 
+;; inline translation of builtin operators
+(define (cg-inline exp name rands frame-size dd cd next-label)
+  (case name
+    [(%eq?)     (cg-binary-pred-inline exp rands frame-size dd cd next-label 'beq.l 'bne.l `(cmp.l ,temp1 ,temp2))]
+    [(%fixnum?) (cg-type-test exp number-tag mask rands frame-size dd cd next-label)]
+    [(%fx+)     (cg-true-inline cg-binary-rands rands frame-size dd cd next-label
+                                (instructions
+                                 `(move.l ,temp1 ,accum)
+                                 `(add.l ,temp2 ,accum)))]
+    [(%fx-)     (cg-true-inline cg-binary-rands rands frame-size dd cd next-label
+                                (instructions
+                                 `(move.l ,temp1 ,accum)
+                                 `(sub.l ,temp2 ,accum)))]
+    [(%fx*)     (cg-true-inline cg-binary-rands rands frame-size dd cd next-label
+                                (instructions
+                                 `(move.l ,temp1 ,accum)
+                                 `(muls.w ,temp2 ,accum)))]
+    [(%car) (cg-ref-inline cg-unary-rand rands frame-size dd cd next-label
+                           `(move.l (,(- word-size pair-tag) ,temp1-addr) ,accum))]
+    [(%cdr) (cg-ref-inline cg-unary-rand rands frame-size dd cd next-label
+                           `(move.l (,(- (* 2 word-size) pair-tag) ,temp1-addr) ,accum))]
+    [(%cons) (cg-true-inline cg-binary-rands rands frame-size dd cd next-label
+                             (instructions
+                              `(move.l ,accum ,temp1-addr)
+                              `(move.l ,temp1 (,(* 1 word-size) ,temp1-addr))
+                              `(move.l ,temp2 (,(* 2 word-size) ,temp1-addr))))]
+    [(%null) (cg-type-test exp null-tag imm-mask rands frame-size dd cd next-label)]
+    [(%string->uninterned-symbol)
+     (cg-true-inline cg-unary-rand rands frame-size dd cd next-label
+                     (instructions
+                      (cg-fix-allocate 2 'accum-addr (cg-framesize frame-size) '(,temp1))
+                      `(move.l ,(header 1 symbol-tag) ,accum-addr)
+                      `(move.l ,temp-1 (,word-size ,accum-addr))
+                      (cg-type-tag symbol-tag 'accum-addr)))]
+    ;;;;;;; TODO other primitives
+    ))
+
+;; generate assembly for loading a piece of data (and a jump to a continuation if applicable)
+(define (cg-load-branch loc dd next-label)
+  (cond
+    [(eq? dd 'effect)
+     (cond
+       [(pair? cd)
+        (let ([true-label (car cd)]
+              [false-label (cadr cd)])
+          (instructions
+           `(move.l ,loc ,temp1)
+           `(cmp.l  ,(encode #f) ,temp1)
+           (cg-branch true-label false-label next-label 'bne.l 'beq.l)))]
+        [else (cg-jump cd next-label)])]
+    [(pair? dd)
+     (let ([register (car dd)]
+           [offset  (cadr dd)])
+       (instructions
+        `(move.l ,loc ,temp1)
+        `(move.l ,temp1 (,offset ,register))
+        (cg-jump cd next-label)))]
+    [else
+     (instructions
+      `(move.l ,loc ,dd)
+      (cg-jump cd next-label))]))
+
+;; assemble code for unary operations
+(define (cg-unary-rand operands frame-size)
+  (let ([operand (car operands)])
+    (let ([end-label (gen-label "unaryoperand")])
+      (instructions
+       (cg operand frame-size temp1 end-label end-label)
+       `(label ,end-label)))))
+
+;; assemble code for binary operations
+(define (cg-binary-rands operands frame-size)
+  (let ([op0 (car operands)]
+        [op1 (cadr operands)])
+    (let ([op0-label (gen-label "binary0")]
+          [op1-label (gen-label "binary1")])
+      (instructions
+       (cg op0 frame-size `(,frame-size ,frame-pointer) op0-label op0-label)
+       `(label ,op0-label)
+       (cg op1 (+ frame-size (* 1 word-size)) accum op1-label op1-label)
+       `(label ,op1-label)
+       `(move.l ,accum ,temp2)
+       `(move.l (,frame-size ,frame-pointer) ,temp1)))))
+
+(define (cg-ref-inline operator operands frame-size dd cd next-label code)
+  (if (eq? dd 'effect)
+      (error "error in cg-ref-inline: not implemented")
+      (instructions
+       (operator operands frame-size)
+       code
+       (cg-store accum dd)
+       (cg-jump cd next-label))))
+
+(define (cg-true-inline operator operands frame-size dd cd next-label code)
+  (if (eq? dd 'effect)
+      (error "error in cg-true-inline: not implemented")
+      (instructions
+       (operator operands frame-size)
+       code
+       (cg-store 'accum dd)
+       (cg-jump cd next-label))))
+
+(define (cg-binary-pred-inline exp rands frame-size dd cd next-label true-instruction false-instruction code)
+  (if (eq? dd 'effect)
+      (if (pair? cd)
+          (let ([true-label (car cd)]
+                [false-label (cadr cd)])
+            (instructions
+             (cg-binary-rands rands)
+             code
+             (cg-branch true-label false-label next-label true-instruction false-instruction)))
+          (instructions
+           (cg-effect-rands rands frame-size)
+           (cg-jump cd next-label)))
+      (cg `(if ,exp '#t '#f) frame-size dd cd next-label)))
+
+(define (cg-type-test exp tag mask rands frame-size dd cd next-label)
+  (if (eq? dd 'effect)
+      (if (pair? cd)
+          (let ([true-label (car cd)]
+                [false-label (cadr cd)])
+            (instructions
+             (cg-unary-rand rands frame-size)
+             `(and.l ,mask ,temp1)
+             `(cmp.l ,tag  ,temp1)
+             (cg-branch true-label false-label next-label 'beq.l 'bne.l)))
+          (instructions
+           (cg-effect-rands rands frame-size)
+           (cg-jump cd next-label)))
+      (cg `(if ,exp '#t '#f) frame-size dd cd next-label)))
+
+
+    
 (define (join-labels a b)
   (cond [(pair? a) (join-labels (car a) b)]
         [(pair? b) (list a (cadr b))]
