@@ -188,6 +188,8 @@
              [`(define-macro _ _)
               (eval e env)
               e]
+             [`(define-syntax ,id ,transformer)
+              (macroexpand env)]
              [else (my-expand e env)])) exps)))
 
 (define (my-expand exp env)
@@ -200,7 +202,7 @@
         [`(if ,t ,c ,a) `(if ,(my-expand t env) ,(my-expand c env) ,(my-expand a env))]
         [`(set! ,v ,e) `(set! ,v ,(my-expand e env))]
         [`(lambda ,formals . ,bodies) `(lambda ,formals ,@(map (lambda (e) (my-expand e env)) bodies))]
-        [else (let ([r (eval `(macroexpand `,exp) env)])
+        [else (let ([r (macroexpand exp)])
                 (if (equal? exp r)
                     (map (lambda (e) (my-expand e env)) r)
                     (my-expand r env)))])
@@ -380,7 +382,7 @@
            (find-syntax (car exp) env))))
   (define (quote? x)
     (and (pair? x)
-         (eqv? 'quote car x)))
+         (eqv? 'quote (car x))))
   
   (cond [(symbol? x) x]
         [(quote? x) x]
@@ -581,7 +583,7 @@
 
 (define (syn-identifier? x)
   (and (syntax-object? x)
-       (symbol? (syntax-object-expr) x)))
+       (symbol? (syntax-object-expr x))))
 
 (define *gen-var-num* 0)
 (define (gen-var id)

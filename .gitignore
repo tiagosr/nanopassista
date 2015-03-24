@@ -1,3 +1,4 @@
 #*.rkt#*#
 *.rkt#*#
 lib/compiled
+lib/gen/compiled
