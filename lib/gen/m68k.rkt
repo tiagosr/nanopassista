@@ -40,7 +40,7 @@
 (define temp2-addr  'a2)
 (define temp3-addr  'a2)
 (define jump-target 'a4)
-(define closure-r   'a5)
+(define closure-ptr 'a5)
 (define frame-ptr   'a6)
 
 (define (encode obj)
@@ -67,6 +67,9 @@
               (if (eq? (caar ls) 'instructions)
                   (append (cdar ls) (loop (cdr ls)))
                   (cons (car ls) (loop (cdr ls))))))))
+
+(define (header len tag)
+  (arithmetic-shift (bitwise-ior (arithmetic-shift len tag-len) tag) 1))
 (define todo '())
 
 ;; compile an expression to assembly
@@ -145,9 +148,9 @@
 ;; assemble a jump that sets up a closure
 (define (cg-jump-closure)
   (instructions
-   `(move.l ,accum ,closure-r)
-   `(sub.l  ,closure-tag ,closure-r)
-   `(move.l (,closure-r ,(* 1 word-size)) ,jump-target)
+   `(move.l ,accum ,closure-ptr)
+   `(sub.l  ,closure-tag ,closure-ptr)
+   `(move.l (,closure-ptr ,(* 1 word-size)) ,jump-target)
    `(jmp    ,jump-target)))
 
 ;; inline translation of builtin operators
@@ -182,13 +185,43 @@
                      (instructions
                       (cg-fix-allocate 2 'accum-addr (cg-framesize frame-size) '(,temp1))
                       `(move.l ,(header 1 symbol-tag) ,accum-addr)
-                      `(move.l ,temp-1 (,word-size ,accum-addr))
+                      `(move.l ,temp1 (,word-size ,accum-addr))
                       (cg-type-tag symbol-tag 'accum-addr)))]
     ;;;;;;; TODO other primitives
     ))
 
+(define (cg-branch true-label false-label next-label jump-if-true jump-if-false)
+  (instructions
+   (cond
+     [(eq? true-label next-label)
+      `(,jump-if-false ,false-label)]
+     [(eq? false-label next-label)
+      `(,jump-if-true ,true-label)]
+     [else
+      (instructions
+       `(,jump-if-true ,true-label)
+       `(bra.l ,false-label))])))
+
+(define (cg-store src dest)
+  (cond
+    [(eq? dest 'effect) (instructions)]
+    [(pair? dest) `(move.l ,src ,dest)]
+    [else
+     (if (eq? src dest)
+         (instructions)
+         `(move.l ,src dest))]))
+
+(define (cg-effect-rands ls fs)
+  (if (null? ls)
+      (instructions)
+      (let ([operand-label (gen-label "operand")])
+        (instructions
+         (cg (car ls) fs 'effect operand-label operand-label)
+         `(label ,operand-label)
+         (cg-effect-rands (cdr ls) fs)))))
+
 ;; generate assembly for loading a piece of data (and a jump to a continuation if applicable)
-(define (cg-load-branch loc dd next-label)
+(define (cg-load-branch loc dd cd next-label)
   (cond
     [(eq? dd 'effect)
      (cond
@@ -227,12 +260,12 @@
     (let ([op0-label (gen-label "binary0")]
           [op1-label (gen-label "binary1")])
       (instructions
-       (cg op0 frame-size `(,frame-size ,frame-pointer) op0-label op0-label)
+       (cg op0 frame-size `(,frame-size ,frame-ptr) op0-label op0-label)
        `(label ,op0-label)
        (cg op1 (+ frame-size (* 1 word-size)) accum op1-label op1-label)
        `(label ,op1-label)
        `(move.l ,accum ,temp2)
-       `(move.l (,frame-size ,frame-pointer) ,temp1)))))
+       `(move.l (,frame-size ,frame-ptr) ,temp1)))))
 
 (define (cg-ref-inline operator operands frame-size dd cd next-label code)
   (if (eq? dd 'effect)
@@ -281,7 +314,47 @@
            (cg-jump cd next-label)))
       (cg `(if ,exp '#t '#f) frame-size dd cd next-label)))
 
+(define (cg-framesize fs)
+  `(move.l ,fs (,frame-ptr ,(- word-size))))
 
+(define (cg-allocate sizecode target frameinfocode usedregs)
+  (let ([allocate
+         (lambda (overflowcode)
+           (let ([dont-label (gen-label "dontgc")])
+             (instructions
+              `(move.l ,accum ,target)
+              `(add.l ,accum ,sizecode)
+              `(cmp.l _heap_end ,accum)
+              `(bge.l ,dont-label)
+              overflowcode
+              `(label ,dont-label))))])
+    (allocate
+     (instructions
+      `(comment "gc")
+      `(sub.l ,sizecode ,accum)
+      frameinfocode
+      `(movem.l [,temp3 ,temp2 ,temp1 ,accum ,closure-ptr ,frame-ptr] (a7-))
+      ;(movem.l ,(encode-regs usedregs))
+      `(move.l ,accum (a7+))
+      `(call 'gc-collect)
+      `(add.l ,(* 7 word-size) a7)
+      `(movem.l [,temp3 ,temp2 ,temp1 ,accum ,closure-ptr ,frame-ptr] (+a7))
+      `(move.l _gc_free ,accum-addr)
+      (allocate faultcode)
+      `(comment "end gc")))))
+
+
+(define faultcode
+  (instructions
+   `(move.l 0 ,accum-addr)
+   `(move.l (0 ,accum-addr) ,accum)))
+
+(define (cg-fix-allocate n target frameinfocode usedregs)
+  (let ([aligned (if (even? n) n (+ n 1))])
+    (cg-allocate (* aligned word-size) target frameinfocode)))
+
+(define (cg-type-tag tag reg)
+  `(or.l ,tag ,reg))
     
 (define (join-labels a b)
   (cond [(pair? a) (join-labels (car a) b)]
