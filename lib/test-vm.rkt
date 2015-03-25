@@ -208,4 +208,4 @@
       (apply format *debug-out-port* frmt args)
       (void)))
 
-(provide (all-defined-out))
+(provide (rename-out [*vm* test:vm]))
