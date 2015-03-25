@@ -174,7 +174,8 @@
 (define (macroless-form exp)
   (if (begin-exp? exp)
       exp
-      `(begin ,@(remove define-macro-exp? (expand-top-level (cdr exp))))))
+      `(begin ,@(remove define-macro-exp?
+                        (expand-top-level (cdr exp))))))
 
 (define (prepend-library exp)
   (if (begin-exp? exp)
@@ -511,7 +512,7 @@
 
 (define (subst-label x)
   (if (subst? x)
-      (cadddr x)
+      (cdddr x)
       x))
 
 (define (add-mark mark x)
