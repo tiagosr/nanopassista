@@ -107,15 +107,20 @@
            (if accum
                (*vm* (car stack) (cdr stack) sequence rstack env)
                (let loop ([next sequence])
-                 (if (or (eq? (car next) 'else) (eq? (car next) 'endif))
+                 (if (or (eq? (car next) 'else) (eq? (car next) 'then))
                      (*vm* (car stack) (cdr stack) (cdr next) rstack env)
                      (loop (cdr next)))))]
           ['else
            (let loop ([next sequence])
-             (if (eq? (car next) 'endif)
+             (if (eq? (car next) 'then)
                  (*vm* accum stack (cdr next) rstack env)
                  (loop (cdr next))))]
-          ['endif        (*vm* accum stack sequence rstack env)]
+          ['then         (*vm* accum stack sequence rstack env)]
+          ['begin        (*vm* accum stack sequence (cons sequence rstack) env)]
+          ['until    (if accum
+                         (*vm* (car stack) (cdr stack) sequence (cdr rstack) env)
+                         (*vm* (car stack) (cdr stack) (car rstack) rstack env))]
+          
           ; I/O
           ['\.           (display accum)
                          (*vm* (car stack) (cdr stack) sequence rstack env)]
