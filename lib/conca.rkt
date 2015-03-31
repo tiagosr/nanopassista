@@ -84,6 +84,7 @@
           ['cons         (*vm* (cons (car stack) accum) (cdr stack) sequence rstack env)]
           ['car          (*vm* (car accum) stack sequence rstack env)]
           ['cdr          (*vm* (cdr accum) stack sequence rstack env)]
+          ['length       (*vm* (length accum) stack sequence rstack env)]
           
           ; data conversion primitives
           ['num->str     (*vm* (number->string accum) stack sequence rstack env)]
