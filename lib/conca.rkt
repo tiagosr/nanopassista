@@ -75,11 +75,16 @@
           ['rot          (*vm* (car stack) (cons (cadr stack) (cons accum (cddr stack))) sequence rstack env)]
           ['over         (*vm* (cadr stack) (cons accum stack) sequence rstack env)]
           ['tuck         (*vm* accum (cons (car stack) (cons accum (cdr stack))) sequence rstack env)]
+          ['nip          (*vm* accum (cdr stack) sequence rstack env)]
           ['pick         (*vm* (list-ref stack accum) stack sequence rstack env)]
           ['roll         (*vm* (list-ref stack accum) (let ([i 0])
                                                         (filter (lambda (v)
                                                                   (set! i (+ i 1))
                                                                   (not (= i accum))) stack)) sequence rstack env)]
+          ['depth        (*vm* (+ 1 (length stack)) (cons accum stack) sequence rstack env)]
+          ['?dup         (*vm* (car stack) (if accum
+                                               stack
+                                               (cdr stack)) sequence rstack env)]
           ; list operation primitives
           ['cons         (*vm* (cons (car stack) accum) (cdr stack) sequence rstack env)]
           ['car          (*vm* (car accum) stack sequence rstack env)]
@@ -103,6 +108,7 @@
           ; return stack primitives
           ['r>           (*vm* (car rstack) (cons accum stack) sequence (cdr rstack) env)]
           ['>r           (*vm* (car stack) (cdr stack) sequence (cons accum rstack) env)]
+          ['rdrop        (*vm* accum stack sequence (cdr rstack) env)]
           ; conditionals
           ['if
            (if accum
