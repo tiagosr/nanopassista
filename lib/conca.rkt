@@ -129,8 +129,19 @@
                          (*vm* (car stack) (cdr stack) (car rstack) rstack env))]
           
           ; I/O
-          ['\.           (display accum)
+          ['\.           (printf " ~a" accum)
                          (*vm* (car stack) (cdr stack) sequence rstack env)]
+          ['dec.         (printf " ~d" accum)
+                         (*vm* (car stack) (cdr stack) sequence rstack env)]
+          ['hex.         (printf " ~x" accum)
+                         (*vm* (car stack) (cdr stack) sequence rstack env)]
+          ['HEX.         (printf " ~X" accum)
+                         (*vm* (car stack) (cdr stack) sequence rstack env)]
+          ['emit         (printf " ~c" accum)
+                         (*vm* (car stack) (cdr stack) sequence rstack env)]
+          ['cr           (write #\n)
+                         (*vm* accum stack sequence rstack env)]
+          
           ; other types
           [(? number? x) (*vm* x (cons accum stack) sequence rstack env)]
           [(? string? x) (*vm* x (cons accum stack) sequence rstack env)]
