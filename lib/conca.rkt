@@ -83,10 +83,8 @@
           ['tuck         (*vm* accum (cons (car stack) (cons accum (cdr stack))) sequence rstack env)]
           ['nip          (*vm* accum (cdr stack) sequence rstack env)]
           ['pick         (*vm* (list-ref stack accum) stack sequence rstack env)]
-          ['roll         (*vm* (list-ref stack accum) (let ([i 0])
-                                                        (filter (lambda (v)
-                                                                  (set! i (+ i 1))
-                                                                  (not (= i accum))) stack)) sequence rstack env)]
+          ['roll         (*vm* (list-ref stack accum) (append (take stack (- accum 1))
+                                                              (drop stack accum)) sequence rstack env)]
           ['depth        (*vm* (+ 1 (length stack)) (cons accum stack) sequence rstack env)]
           ['?dup         (*vm* (car stack) (if accum
                                                stack
@@ -95,7 +93,19 @@
           ['cons         (*vm* (cons (car stack) accum) (cdr stack) sequence rstack env)]
           ['car          (*vm* (car accum) stack sequence rstack env)]
           ['cdr          (*vm* (cdr accum) stack sequence rstack env)]
+          ['rcons        (*vm* (cons accum (car stack)) (cdr stack) sequence rstack env)]
           ['length       (*vm* (length accum) stack sequence rstack env)]
+          ['ltake        (*vm* (take (car stack) accum) (cdr stack) sequence rstack env)]
+          ['ldrop        (*vm* (drop (car stack) accum) (cdr stack) sequence rstack env)]
+          ['ltake-r      (*vm* (take-right (car stack) accum) (cdr stack) sequence rstack env)]
+          ['ldrop-r      (*vm* (drop-right (car stack) accum) (cdr stack) sequence rstack env)]
+          ['lflatten     (*vm* (flatten accum) stack sequence rstack env)]
+          ['null         (*vm* null (cons accum stack) sequence rstack env)]
+          ['list?        (*vm* (list? accum) (cons accum stack) sequence rstack env)]
+          ['null?        (*vm* (null? accum) (cons accum stack) sequence rstack env)]
+          ['append       (*vm* (append (car stack) accum) (cdr stack) sequence rstack env)]
+          
+          
           
           ; data conversion primitives
           ['num->str     (*vm* (number->string accum) stack sequence rstack env)]
@@ -115,6 +125,20 @@
           ['r>           (*vm* (car rstack) (cons accum stack) sequence (cdr rstack) env)]
           ['>r           (*vm* (car stack) (cdr stack) sequence (cons accum rstack) env)]
           ['rdrop        (*vm* accum stack sequence (cdr rstack) env)]
+          ['rlength      (*vm* (length rstack) (cons accum stack) sequence rstack env)]
+          
+          ; experimental return stack primitives
+          ['rdup         (*vm* accum stack sequence (cons (car rstack) rstack) env)]
+          ['rswap        (*vm* accum stack sequence (cons (cdar rstack) (cons (car rstack) (cddr rstack))) env)]
+          ['rover        (*vm* accum stack sequence (cons (cdar rstack) rstack) env)]
+          ['rnip         (*vm* accum stack sequence (cons (car rstack) (cddr rstack)) env)]
+          ['rtuck        (*vm* (car stack) (cdr stack) sequence (cons (car rstack) (cons accum (cdr rstack))) env)]
+          ['rpick        (*vm* (car stack) (cdr stack) sequence (cons (list-ref rstack accum) rstack) env)]
+          ['rroll        (*vm* (car stack) (cdr stack) sequence (cons (list-ref rstack accum)
+                                                                      (append (take rstack (- accum 1))
+                                                                              (drop rstack accum))) env)]
+          
+                                                                            
           ; conditionals
           ['if
            (if accum
